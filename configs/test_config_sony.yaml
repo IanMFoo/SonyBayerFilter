@@ -61,11 +61,11 @@ device_vertical_minimum_um: 0
 # Structure the following list such that the last entry is the last medium above the device.
 objects_above_device: [] #['permittivity_layer_substrate',
                         #'silicon_substrate']
-num_sidewalls: 0
+num_sidewalls: 4
 sidewall_thickness_um: 0.24
-sidewall_material: 'etch'
-sidewall_extend_focalplane: False
-sidewall_vertical_minimum_um: -0.765
+sidewall_material: 'air'
+sidewall_extend_focalplane: True
+sidewall_vertical_minimum_um: -0.765  # only needed if sidewall_extend_focalplane is False; describes how far down from the device they extend
 
 #* Spectral
 

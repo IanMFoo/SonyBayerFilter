@@ -53,7 +53,7 @@ with open( yaml_filename, 'rb' ) as yaml_file:
 logging.debug(f'Read parameters from file: {yaml_filename}')
 
 #* Create project folder to store all files
-projects_directory_location = 'ares_' + os.path.basename(python_src_directory)
+projects_directory_location = '_trials_' + os.path.basename(python_src_directory)
 if args.override is not None:
 	projects_directory_location = args.override
 if not os.path.isdir(projects_directory_location):

@@ -25,6 +25,6 @@
 
 source activate fdtd
 
-xvfb-run --server-args="-screen 0 1280x1024x24" python SonyBayerFilterOptimization.py --filename "configs/test_config_sony.yaml" > stdout_mwir_g0.log 2> stderr_mwir_g0.log
+xvfb-run --server-args="-screen 0 1280x1024x24" python SonyBayerFilterOptimization.py --filename "configs/test_config_sony.yaml" > stdout_vis10lyr.log 2> stderr_vis10lyr.log
 
 exit $?

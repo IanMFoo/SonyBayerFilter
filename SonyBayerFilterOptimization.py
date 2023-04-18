@@ -84,7 +84,7 @@ DATA_FOLDER = projects_directory_location
 SAVED_SCRIPTS_FOLDER = os.path.join(projects_directory_location, 'saved_scripts')
 OPTIMIZATION_INFO_FOLDER = os.path.join(projects_directory_location, 'opt_info')
 OPTIMIZATION_PLOTS_FOLDER = os.path.join(OPTIMIZATION_INFO_FOLDER, 'plots')
-DEBUG_COMPLETED_JOBS_FOLDER = 'ares_test_dev'
+DEBUG_COMPLETED_JOBS_FOLDER = '_trials_test_dev'
 PULL_COMPLETED_JOBS_FOLDER = projects_directory_location
 if running_on_local_machine:
 	PULL_COMPLETED_JOBS_FOLDER = DEBUG_COMPLETED_JOBS_FOLDER
