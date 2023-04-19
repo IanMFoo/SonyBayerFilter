@@ -63,7 +63,7 @@ objects_above_device: [] #['permittivity_layer_substrate',
                         #'silicon_substrate']
 num_sidewalls: 4
 sidewall_thickness_um: 0.24
-sidewall_material: 'air'
+sidewall_material: 'etch'
 sidewall_extend_focalplane: True
 sidewall_vertical_minimum_um: -0.765  # only needed if sidewall_extend_focalplane is False; describes how far down from the device they extend
 
