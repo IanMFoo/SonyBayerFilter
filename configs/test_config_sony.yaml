@@ -95,7 +95,7 @@ fdtd_simulation_time_fs: 600 #3000
 #* Forward (Input) Source
 
 weight_by_individual_wavelength: True   # At present this changes nothing.
-use_gaussian_sources: True
+use_gaussian_sources: False
 
 use_airy_approximation: True
 f_number: 2.2
