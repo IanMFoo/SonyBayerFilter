@@ -11,8 +11,7 @@
 import sys
 import os
 import copy
-import numpy as npf
-import autograd.numpy as np
+import numpy as np
 import logging
 import traceback
 import shelve
@@ -101,32 +100,43 @@ def convert_root_folder(address, root_folder_new):
 	return new_address
 
 def generate_value_array(start,end,step):
-    '''Returns a conveniently formatted output list according to np.arange() that can be copy-pasted to a JSON.'''
-    output_array = json.dumps(np.arange(start,end+step,step).tolist())
-    import pyperclip
-    pyperclip.copy(output_array)
-    return output_array
+	'''Returns a conveniently formatted output list according to np.arange() that can be copy-pasted to a JSON.'''
+	import json
+	import pyperclip
+	output_array = json.dumps(np.arange(start,end+step,step).tolist())
+	pyperclip.copy(output_array)
+	return output_array
 
 # Nested dictionary handling - https://stackoverflow.com/a/14692747
 def get_by_path(root, items):
-    """Access a nested object in root by item sequence."""
-    return reduce(operator.getitem, items, root)
+	"""Access a nested object in root by item sequence."""
+	return reduce(operator.getitem, items, root)
 
 def set_by_path(root, items, value):
-    """Set a value in a nested object in root by item sequence."""
-    get_by_path(root, items[:-1])[items[-1]] = value
+	"""Set a value in a nested object in root by item sequence."""
+	get_by_path(root, items[:-1])[items[-1]] = value
 
 def del_by_path(root, items):
-    """Delete a key-value in a nested object in root by item sequence."""
-    del get_by_path(root, items[:-1])[items[-1]]
+	"""Delete a key-value in a nested object in root by item sequence."""
+	del get_by_path(root, items[:-1])[items[-1]]
 #######################################
 
+def rescale_vector(x, min0, max0, min1, max1):
+	return (max1-min1)/(max0-min0) * (x-min0) + min1
 
 def index_from_permittivity(permittivity_):
 	'''Checks all permittivity values are real and then takes square root to give index.'''
 	assert np.all(np.imag(permittivity_) == 0), 'Not expecting complex index values right now!'
 
 	return np.sqrt(permittivity_)
+
+def binarize(variable_in):
+	'''Assumes density - if not, convert explicitly.'''
+	return 1.0 * np.greater_equal(variable_in, 0.5)
+
+def compute_binarization( input_variable, set_point=0.5 ):
+	total_shape = np.prod( input_variable.shape )
+	return ( 2. / total_shape ) * np.sum( np.sqrt( ( input_variable - set_point )**2 ) )
 
 
 def softplus( x_in, softplus_kappa ):

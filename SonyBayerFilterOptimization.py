@@ -50,15 +50,16 @@ globals().update(processed_vars)
 # Custom Classes and Imports
 from configs import *
 from evaluation import *
-from executor import *
+# from executor import *
 from utils import *
 from utils import lum_utils as lm
 from utils import SonyBayerFilter
 
 # Photonics
-import imp	# Lumerical hook Python library API
-imp.load_source( "lumapi", lumapi_filepath)
-import lumapi
+import importlib.util as imp	# Lumerical hook Python library API
+spec_lumapi = imp.spec_from_file_location('lumapi', lumapi_filepath)
+lumapi = imp.module_from_spec(spec_lumapi)
+spec_lumapi.loader.exec_module(lumapi)
 
 # Start logging - Logger is already initialized through the call to cfg_to_params_sony.py
 logging.info(f'Starting up optimization file: {os.path.basename(__file__)}')
@@ -84,7 +85,7 @@ DATA_FOLDER = projects_directory_location
 SAVED_SCRIPTS_FOLDER = os.path.join(projects_directory_location, 'saved_scripts')
 OPTIMIZATION_INFO_FOLDER = os.path.join(projects_directory_location, 'opt_info')
 OPTIMIZATION_PLOTS_FOLDER = os.path.join(OPTIMIZATION_INFO_FOLDER, 'plots')
-DEBUG_COMPLETED_JOBS_FOLDER = '_trials_test_dev'
+DEBUG_COMPLETED_JOBS_FOLDER = 'ares_test_dev'
 PULL_COMPLETED_JOBS_FOLDER = projects_directory_location
 if running_on_local_machine:
 	PULL_COMPLETED_JOBS_FOLDER = DEBUG_COMPLETED_JOBS_FOLDER
@@ -108,13 +109,14 @@ if not os.path.isdir( OPTIMIZATION_PLOTS_FOLDER ):
 	os.mkdir( OPTIMIZATION_PLOTS_FOLDER )
 
 try:
-	shutil.copy2( python_src_directory + "/slurm_vis.sh", SAVED_SCRIPTS_FOLDER + "/slurm_vis.sh" )
+	shutil.copy2( python_src_directory + "/slurm_vis10lyr.sh", SAVED_SCRIPTS_FOLDER + "/slurm_vis10lyr.sh" )
 except Exception as ex:
 	pass
 shutil.copy2( python_src_directory + "/SonyBayerFilterOptimization.py", SAVED_SCRIPTS_FOLDER + "/SonyBayerFilterOptimization.py" )
 shutil.copy2( os.path.join(python_src_directory, yaml_filename), 
 			 os.path.join(SAVED_SCRIPTS_FOLDER, os.path.basename(yaml_filename)) )
 shutil.copy2( python_src_directory + "/configs/SonyBayerFilterParameters.py", SAVED_SCRIPTS_FOLDER + "/SonyBayerFilterParameters.py" )
+# TODO: et cetera... might have to save out various scripts from each folder
 
 #  Create convenient folder for evaluation code
 if os.path.exists(EVALUATION_CONFIG_FOLDER):
@@ -125,10 +127,7 @@ if os.path.exists(EVALUATION_UTILS_FOLDER):
 	shutil.rmtree(EVALUATION_UTILS_FOLDER)
 shutil.copytree(os.path.join(python_src_directory, "utils"), EVALUATION_UTILS_FOLDER)
 
-# shutil.copy2( os.path.abspath(python_src_directory + "/evaluation/LumProcSweep.py"), EVALUATION_FOLDER + "/LumProcSweep.py" )
-shutil.copy2( os.path.abspath(python_src_directory + "/evaluation/LumProcParameters.py"), EVALUATION_CONFIG_FOLDER + "/LumProcParameters.py" )
-shutil.copy2( os.path.abspath(python_src_directory + "/evaluation/sweep_settings.json"), EVALUATION_CONFIG_FOLDER + "/sweep_settings.json" )
-shutil.copy2( os.path.abspath(python_src_directory + "/evaluation/plotter.py"), EVALUATION_UTILS_FOLDER + "/plotter.py" )
+#shutil.copy2( os.path.abspath(python_src_directory + "/evaluation/plotter.py"), EVALUATION_UTILS_FOLDER + "/plotter.py" )
 
 
 # SLURM Environment
@@ -232,6 +231,16 @@ def create_dict_nx(dict_name):
 	else:
 		globals()[dict_name] = {}
 
+def density_to_index(cur_density):
+	cur_permittivity = min_device_permittivity + (dispersive_max_permittivity - min_device_permittivity) * cur_density
+	cur_index = utility.index_from_permittivity( cur_permittivity )
+	return cur_index
+
+def index_to_density(cur_index):
+	cur_permittivity = cur_index**2
+	cur_density = (cur_permittivity - min_device_permittivity) / (dispersive_max_permittivity - min_device_permittivity)
+	return cur_density
+
 
  
 # TODO: Put into some dispersion module -----------------------------
@@ -315,6 +324,8 @@ def fdtd_update_object( fdtd_hook_, simDict, create_object=False ):
 					fdtd_hook_.addpower(name=simDict['name'])
 				else:
 					fdtd_hook_.addprofile(name=simDict['name'])
+			elif any(ele.lower() in type_string for ele in ['IndexMonitor']):
+				fdtd_hook_.addindex(name=simDict['name'])
 			elif any(ele.lower() in type_string for ele in ['Import']):
 				fdtd_hook_.addimport(name=simDict['name'])
 			elif any(ele.lower() in type_string for ele in ['Rectangle']):
@@ -381,14 +392,41 @@ def disable_all_sources():
 
 	disable_objects(object_list)
 
+def get_device_index(fdtd_hook):
+	'''Returns index data from the device index monitor.'''
+	device_index = fdtd_hook.getresult(design_index_monitor['name'],"index preview")
+	n_dev = device_index['index_x']
+	return device_index, n_dev
+
+def check_indices_equal(device_index):
+	'''Check for anisotropy in the device index monitor.'''
+	n_x = np.real(device_index['index_x'])
+	n_y = np.real(device_index['index_y'])
+	n_z = np.real(device_index['index_z'])
+	if np.all(n_x == n_y) and np.all(n_x == n_z):
+		return True
+	else:   return False 
+
+
 #
 #* Step 0: Set up structures, regions and monitors from which E-fields, Poynting fields, and transmission data will be drawn.
 # Also any other necessary editing of the Lumerical environment and objects.
 #
 
 # Create an instance of the device to store permittivity values
+# bayer_filter_size_voxels = np.array(
+# 	[device_voxels_lateral, device_voxels_lateral, device_voxels_vertical])
+# logging.info(f'Creating Bayer Filter with voxel size {bayer_filter_size_voxels}.')
+# bayer_filter = SonyBayerFilter.SonyBayerFilter(
+# 	bayer_filter_size_voxels,
+# 	[ 0.0, 1.0 ],
+# 	init_permittivity_0_1_scale,
+# 	num_vertical_layers,
+# 	vertical_layer_height_voxels)
+
+#! new
 bayer_filter_size_voxels = np.array(
-	[device_voxels_lateral, device_voxels_lateral, device_voxels_vertical])
+	[device_voxels_lateral_bordered, device_voxels_lateral_bordered, device_voxels_vertical])
 logging.info(f'Creating Bayer Filter with voxel size {bayer_filter_size_voxels}.')
 bayer_filter = SonyBayerFilter.SonyBayerFilter(
 	bayer_filter_size_voxels,
@@ -396,6 +434,7 @@ bayer_filter = SonyBayerFilter.SonyBayerFilter(
 	init_permittivity_0_1_scale,
 	num_vertical_layers,
 	vertical_layer_height_voxels)
+
 
 if start_from_step == 0:
  
@@ -405,26 +444,43 @@ if start_from_step == 0:
 	# plt.colorbar(c)
 	# plt.show()
 
-	bayer_filter_region_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_lateral)
-	bayer_filter_region_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_lateral)
+	# bayer_filter_region_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_lateral)
+	# bayer_filter_region_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_lateral)
+	# bayer_filter_region_z = 1e-6 * np.linspace(device_vertical_minimum_um, device_vertical_maximum_um, device_voxels_vertical)
+
+	#! new	
+	bayer_filter_region_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, device_voxels_lateral_bordered)
+	bayer_filter_region_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, device_voxels_lateral_bordered)
 	bayer_filter_region_z = 1e-6 * np.linspace(device_vertical_minimum_um, device_vertical_maximum_um, device_voxels_vertical)
+	# Populate a 3+1-D array at each xyz-position with the values of x, y, and z such that 
+	# bayer_filter_region[x,y,z,:] = [ region_x[x], region_y[y], region_z[z] ]
+	bayer_filter_region = np.array(np.meshgrid(bayer_filter_region_x,bayer_filter_region_y,bayer_filter_region_z, indexing='ij')
+							   ).transpose((1,2,3,0))
+
+	bayer_filter_region_reinterpolate_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, device_voxels_lateral_bordered * reinterpolate_permittivity_factor)
+	bayer_filter_region_reinterpolate_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, device_voxels_lateral_bordered * reinterpolate_permittivity_factor)
+	bayer_filter_region_reinterpolate_z = 1e-6 * np.linspace(device_vertical_minimum_um, device_vertical_maximum_um, device_voxels_vertical * reinterpolate_permittivity_factor)
+	bayer_filter_region_reinterpolate = np.array(np.meshgrid(bayer_filter_region_reinterpolate_x,bayer_filter_region_reinterpolate_y,
+														 bayer_filter_region_reinterpolate_z, indexing='ij')
+							   				).transpose((1,2,3,0))
+
  
-	# Populate a 3+1-D array at each xyz-position with the values of x, y, and z
-	bayer_filter_region = np.zeros( 
-		( device_voxels_lateral, device_voxels_lateral, device_voxels_vertical, 3 ) )
-	for x_idx in range( 0, device_voxels_lateral ):
-		for y_idx in range( 0, device_voxels_lateral ):
-			for z_idx in range( 0, device_voxels_vertical ):
-				bayer_filter_region[ x_idx, y_idx, z_idx, : ] = [
-						bayer_filter_region_x[ x_idx ], bayer_filter_region_y[ y_idx ], bayer_filter_region_z[ z_idx ] ]
 	logging.debug(f'Bayer Filter Region has array shape {np.shape(bayer_filter_region)}.')
 
-	gradient_region_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_simulation_mesh_lateral)
-	gradient_region_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_simulation_mesh_lateral)
+	# gradient_region_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_simulation_mesh_lateral)
+	# gradient_region_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_um, 0.5 * device_size_lateral_um, device_voxels_simulation_mesh_lateral)
+	# gradient_region_z = 1e-6 * np.linspace(device_vertical_minimum_um, device_vertical_maximum_um, device_voxels_simulation_mesh_vertical)
+
+	# new
+	gradient_region_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, device_voxels_simulation_mesh_lateral_bordered)
+	gradient_region_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, device_voxels_simulation_mesh_lateral_bordered)
 	gradient_region_z = 1e-6 * np.linspace(device_vertical_minimum_um, device_vertical_maximum_um, device_voxels_simulation_mesh_vertical)
 
+
+
 	# Get the device's dimensions in terms of (MESH) voxels
-	field_shape = [device_voxels_simulation_mesh_lateral, device_voxels_simulation_mesh_lateral, device_voxels_simulation_mesh_vertical]
+	field_shape = [device_voxels_simulation_mesh_lateral_bordered, device_voxels_simulation_mesh_lateral_bordered, device_voxels_simulation_mesh_vertical]
+	logging.info(f'NOTE: Simulation mesh should yield field shape in design_Efield_monitor of {field_shape}.')
 	
 	
 	logging.info("Beginning Step 0: Lumerical Environment Setup")
@@ -632,8 +688,8 @@ if start_from_step == 0:
 	design_efield_monitor['type'] = 'DFTMonitor'
 	design_efield_monitor['power_monitor'] = False
 	design_efield_monitor['monitor type'] = '3D'
-	design_efield_monitor['x span'] = device_size_lateral_um * 1e-6
-	design_efield_monitor['y span'] = device_size_lateral_um * 1e-6
+	design_efield_monitor['x span'] = device_size_lateral_bordered_um * 1e-6
+	design_efield_monitor['y span'] = device_size_lateral_bordered_um * 1e-6
 	design_efield_monitor['z max'] = device_vertical_maximum_um * 1e-6
 	design_efield_monitor['z min'] = device_vertical_minimum_um * 1e-6
 	design_efield_monitor['override global monitor settings'] = 1
@@ -712,12 +768,53 @@ if start_from_step == 0:
 	design_import = {}
 	design_import['name'] = 'design_import'
 	design_import['type'] = 'Import'
-	design_import['x span'] = device_size_lateral_um * 1e-6
-	design_import['y span'] = device_size_lateral_um * 1e-6
+	design_import['x span'] = device_size_lateral_bordered_um * 1e-6
+	design_import['y span'] = device_size_lateral_bordered_um * 1e-6
 	design_import['z max'] = device_vertical_maximum_um * 1e-6
 	design_import['z min'] = device_vertical_minimum_um * 1e-6
 	design_import = fdtd_update_object(fdtd_hook, design_import, create_object=True)
 	fdtd_objects['design_import'] = design_import
+
+	# Add device index monitor
+	design_index_monitor = {}
+	design_index_monitor['name'] = 'design_index_monitor'
+	design_index_monitor['type'] = 'IndexMonitor'
+	design_index_monitor['monitor type'] = '3D'
+	design_index_monitor['x span'] = device_size_lateral_bordered_um * 1e-6
+	design_index_monitor['y span'] = device_size_lateral_bordered_um * 1e-6
+	design_index_monitor['z max'] = device_vertical_maximum_um * 1e-6
+	design_index_monitor['z min'] = device_vertical_minimum_um * 1e-6
+	design_index_monitor['spatial interpolation'] = 'nearest mesh cell'
+	design_index_monitor = fdtd_update_object(fdtd_hook, design_index_monitor, create_object=True)
+	fdtd_objects['design_index_monitor'] = design_index_monitor
+
+	# Install Aperture that blocks off source
+	if use_source_aperture:
+		source_block = {}
+		source_block['name'] = 'PEC_screen'
+		source_block['type'] = 'Rectangle'
+		source_block['x'] = 0 * 1e-6
+		source_block['x span'] = 1.1*4/3*1.2 * device_size_lateral_um * 1e-6
+		source_block['y'] = 0 * 1e-6
+		source_block['y span'] = 1.1*4/3*1.2 * device_size_lateral_um * 1e-6
+		source_block['z min'] = (device_vertical_maximum_um + 3 * mesh_spacing_um) * 1e-6
+		source_block['z max'] = (device_vertical_maximum_um + 3 * mesh_spacing_um + pec_aperture_thickness_um) * 1e-6
+		source_block['material'] = 'PEC (Perfect Electrical Conductor)'
+		source_block = fdtd_update_object(fdtd_hook, source_block, create_object=True)
+		fdtd_objects['source_block'] = source_block
+		
+		source_aperture = {}
+		source_aperture['name'] = 'source_aperture'
+		source_aperture['type'] = 'Rectangle'
+		source_aperture['x'] = 0 * 1e-6
+		source_aperture['x span'] = device_size_lateral_um * 1e-6
+		source_aperture['y'] = 0 * 1e-6
+		source_aperture['y span'] = device_size_lateral_um * 1e-6
+		source_aperture['z min'] = (device_vertical_maximum_um + 3 * mesh_spacing_um) * 1e-6
+		source_aperture['z max'] = (device_vertical_maximum_um + 3 * mesh_spacing_um + pec_aperture_thickness_um) * 1e-6
+		source_aperture['index'] = background_index
+		source_aperture = fdtd_update_object(fdtd_hook, source_aperture, create_object=True)
+		fdtd_objects['source_aperture'] = source_aperture
 
 	# Set up sidewalls on the side to try and attenuate crosstalk
 	device_sidewalls = []
@@ -810,7 +907,9 @@ def run_jobs_inner( queue_in ):
 
 		process = subprocess.Popen(
 			[
-				os.path.abspath(python_src_directory + "/utils/run_proc.sh"),
+				#! Make sure this points to the right place
+				# os.path.abspath(python_src_directory + "/utils/run_proc.sh"),		# TODO: There's some permissions issue??
+				'/home/gdrobert/Develompent/adjoint_lumerical/inverse_design/run_proc.sh',
 				cluster_hostnames[ job_idx ],
 				get_job_path
 			]
@@ -861,12 +960,14 @@ pdaf_quadrant_transmission_data = {}
 figure_of_merit_evolution = np.zeros((num_epochs, num_iterations_per_epoch))
 pdaf_transmission_evolution = np.zeros((num_epochs, num_iterations_per_epoch))
 step_size_evolution = np.zeros((num_epochs, num_iterations_per_epoch))
+binarization_evolution = np.zeros((num_epochs, num_iterations_per_epoch))
 average_design_variable_change_evolution = np.zeros((num_epochs, num_iterations_per_epoch))
 max_design_variable_change_evolution = np.zeros((num_epochs, num_iterations_per_epoch))
 
 # By iteration, focal area, polarization, wavelength: 
 # Create a dictionary of FoMs. Each key corresponds to a value: an array storing data of a specific FoM,
 # for each epoch, iteration, quadrant, polarization, and wavelength.
+# TODO: Consider using xarray instead of numpy arrays in order to have dimension labels for each axis.
 fom_evolution = {}
 for fom_type in fom_types:
 	fom_evolution[fom_type] = np.zeros((num_epochs, num_iterations_per_epoch, 
@@ -932,8 +1033,21 @@ if restart or evaluate:
 	# Load in the most recent Design density variable (before filters of device), values between 0 and 1
 	cur_design_variable = np.load(
 			OPTIMIZATION_INFO_FOLDER + "/cur_design_variable.npy" )
-	# Re-initialize bayer_filter instance
-	bayer_filter.w[0] = cur_design_variable
+
+	reload_design_variable = cur_design_variable.copy()
+	if evaluate_bordered_extended:
+		design_var_reload_width = cur_design_variable.shape[ 0 ]
+		design_var_width = bayer_filter.w[0].shape[ 0 ]
+
+		pad_2x_width_reload = design_var_width - design_var_reload_width
+		assert ( pad_2x_width_reload > 0 ) and ( ( pad_2x_width_reload % 2 ) == 0 ), 'Expected the width difference to be positive and even!'
+		pad_width_reload = pad_2x_width_reload // 2
+  
+		reload_design_variable = np.pad( cur_design_variable, ( ( pad_width_reload, pad_width_reload ), ( pad_width_reload, pad_width_reload ), ( 0, 0 ) ), mode='constant' )
+ 
+	# # Re-initialize bayer_filter instance
+	# bayer_filter.w[0] = cur_design_variable
+	bayer_filter.w[0] = reload_design_variable
 	# Regenerate permittivity based on the most recent design, assuming epoch 0		
  	# NOTE: This gets corrected later in the optimization loop (Step 1)
 	bayer_filter.update_permittivity()
@@ -946,6 +1060,7 @@ if restart or evaluate:
 	step_size_evolution = np.load(OPTIMIZATION_INFO_FOLDER + "/step_size_evolution.npy")
 	average_design_variable_change_evolution = np.load(OPTIMIZATION_INFO_FOLDER + "/average_design_change_evolution.npy")
 	max_design_variable_change_evolution = np.load(OPTIMIZATION_INFO_FOLDER + "/max_design_change_evolution.npy")
+	adam_moments = np.load(OPTIMIZATION_INFO_FOLDER + "/adam_moments.npy")
 
 
 	if restart_epoch == 0 and restart_iter == 1:
@@ -960,10 +1075,21 @@ if restart or evaluate:
 			fom_evolution[fom_type] = np.zeros((num_epochs, num_iterations_per_epoch, 
 												num_focal_spots, len(xy_names), num_design_frequency_points))
 		# The main FoM being used for optimization is indicated in the config.
+
+		# [OPTIONAL]: Use binarized density variable instead of intermediate
+		bayer_filter.update_filters( num_epochs - 1 )
+		bayer_filter.update_permittivity()
+		cur_density = bayer_filter.get_permittivity()
+		cur_design_variable = cur_density
+		bayer_filter.w[0] = cur_design_variable
 	
 	# Set everything ahead of the restart epoch and iteration to zero.
 	for rs_epoch in range(restart_epoch, num_epochs):
-		for rs_iter in range(restart_iter, num_iterations_per_epoch):
+		if rs_epoch == restart_epoch:
+			rst_iter = restart_iter
+		else:	rst_iter = 0
+
+		for rs_iter in range(rst_iter, num_iterations_per_epoch):
 			figure_of_merit_evolution[rs_epoch, rs_iter] = 0
 			pdaf_transmission_evolution[rs_epoch, rs_iter] = 0
 			step_size_evolution[rs_epoch, rs_iter] = 0
@@ -979,6 +1105,28 @@ if evaluate:
 	bayer_filter.update_filters( num_epochs - 1 )
 	bayer_filter.update_permittivity()
 	cur_density = bayer_filter.get_permittivity()
+ 
+	#
+	# Binarize the current permittivity
+	#
+	hard_binarize = True#False#True
+
+	if hard_binarize:
+		if binarize_3_levels:
+			low_distance = np.abs( cur_density )
+			mid_distance = np.abs( cur_density - 0.5 )
+			high_distance = np.abs( cur_density - 1.0 )
+
+			cur_density = (
+				( ( low_distance < mid_distance ) * ( low_distance < high_distance ) ) * np.zeros( cur_density.shape ) +
+				( ( mid_distance <= low_distance ) * ( mid_distance < high_distance ) ) * 0.5 * np.ones( cur_density.shape ) +
+				( ( high_distance <= low_distance ) * ( high_distance <= mid_distance ) ) * np.ones( cur_density.shape ) )
+
+		else:
+			cur_density = 1.0 * np.greater_equal( cur_density, 0.5 )
+
+	if do_normalize:
+		cur_density = np.mean( cur_density ) * np.ones( cur_density.shape )
 
 	fdtd_hook.switchtolayout()
 	
@@ -1093,16 +1241,59 @@ else:		# optimization
 					# [DEPRECATED] Account for dispersion by using the dispersion_model.
 					dispersive_max_permittivity = dispersion_model.average_permittivity( dispersive_ranges_um[ dispersive_range_idx ] )
 					dispersive_max_index = utility.index_from_permittivity( dispersive_max_permittivity )
-	 
+
+					#! new
+					if reinterpolate_permittivity:
+		
+						cur_density_import = np.repeat( np.repeat( np.repeat( cur_density, 
+														int(np.ceil(reinterpolate_permittivity_factor)), axis=0 ),
+													int(np.ceil(reinterpolate_permittivity_factor)), axis=1 ),
+												int(np.ceil(reinterpolate_permittivity_factor)), axis=2 )
+
+						bayer_filter_region_import_x = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, 300)
+						bayer_filter_region_import_y = 1e-6 * np.linspace(-0.5 * device_size_lateral_bordered_um, 0.5 * device_size_lateral_bordered_um, 300)
+						bayer_filter_region_import_z = 1e-6 * np.linspace(device_vertical_minimum_um, device_vertical_maximum_um, 306)
+						bayer_filter_region_import = np.array( np.meshgrid(
+									bayer_filter_region_import_x, bayer_filter_region_import_y, bayer_filter_region_import_z,
+								indexing='ij')
+							).transpose((1,2,3,0))
+
+						cur_density_import_interp = interpolate.interpn( ( bayer_filter_region_reinterpolate_x, 
+																			bayer_filter_region_reinterpolate_y, 
+															 				bayer_filter_region_reinterpolate_z ), 
+									cur_density_import, bayer_filter_region_import, 
+									method='linear' )
+	
+					else:
+						cur_density_import_interp = cur_density.copy()	 
+
+					# IF YOU WANT TO BINARIZE BEFORE IMPORTING:
+					# cur_density_import_interp = utility.binarize(cur_density_import_interp)
+
 					# Scale from [0, 1] back to [min_device_permittivity, max_device_permittivity]
 					#! This is the only cur_whatever_variable that will ever be anything other than [0, 1].
-					cur_permittivity = min_device_permittivity + ( dispersive_max_permittivity - min_device_permittivity ) * cur_density
+					cur_permittivity = min_device_permittivity + ( dispersive_max_permittivity - min_device_permittivity ) * cur_density_import_interp
 					cur_index = utility.index_from_permittivity( cur_permittivity )
+					logging.info(f'TiO2% is {100 * np.count_nonzero(cur_index > min_device_index) / cur_index.size}%.')
+					# logging.info(f'Binarization is {100 * np.sum(np.abs(cur_density-0.5))/(cur_density.size*0.5)}%.')
+					logging.info(f'Binarization is {100 * utility.compute_binarization(cur_density)}%.')
+					binarization_evolution[epoch, iteration] = 100 * utility.compute_binarization(cur_density)
+
+					# Update bayer_filter data for actual permittivity (not just density 0 to 1)
+					bayer_filter.update_actual_permittivity_values(min_device_permittivity, dispersive_max_permittivity)
 
 					fdtd_hook.switchtolayout()
 					fdtd_hook.select( design_import['name'] )
-					fdtd_hook.importnk2( cur_index, bayer_filter_region_x, 
-										bayer_filter_region_y, bayer_filter_region_z )
+					# fdtd_hook.importnk2( cur_index, bayer_filter_region_x, 
+					# 					bayer_filter_region_y, bayer_filter_region_z )
+					fdtd_hook.importnk2( cur_index, bayer_filter_region_reinterpolate_x, 
+										bayer_filter_region_reinterpolate_y, bayer_filter_region_reinterpolate_z )
+
+	 
+					# Disable device index monitor
+					design_index_monitor['enabled'] = False
+					design_index_monitor = fdtd_update_object(fdtd_hook, design_index_monitor, create_object=True)
+
 
 					for xy_idx in range(0, 2):
 						disable_all_sources()	# Create a job with only the source of interest active.
@@ -1188,7 +1379,7 @@ else:		# optimization
 						logging.info(f'Loading: {utility.isolate_filename(completed_job_filepath)}. Time taken: {time.time()-start_loadtime} seconds.')
 	  
 						fwd_e_fields = lm.get_efield(fdtd_hook, design_efield_monitor['name'])
-						logging.info('Accessed design E-field monitor.')
+						logging.info(f'Accessed design E-field monitor. NOTE: Field shape obtained is: {fwd_e_fields.shape}')
 	
 						#* Populate forward_e_fields with device E-field info
 						if ( dispersive_range_idx == 0 ):
@@ -1275,6 +1466,7 @@ else:		# optimization
 						get_focal_data = focal_data[polarizations[polarization_idx]]                                    # shape: (#focalspots, 3, nx, ny, nz, nλ)
 						get_quad_transmission_data = quadrant_transmission_data[polarizations[polarization_idx]]        # shape: (#focalspots, nλ)
 	
+						# TODO: Try and offload these parts to another wavelength modular thing.
 						max_intensity_weighting = max_intensity_by_wavelength[spectral_focal_plane_map[focal_idx][0] : spectral_focal_plane_map[focal_idx][1] : 1]
 						# Use the max_intensity_weighting to renormalize the intensity distribution used to calculate the FoM
 						# and insert the custom weighting schemes here as well.
@@ -1343,6 +1535,10 @@ else:		# optimization
 				plotter.plot_individual_quadrant_transmission(quadrant_transmission_data, lambda_values_um, OPTIMIZATION_PLOTS_FOLDER,
 												  		epoch, iteration=30)	# continuously produces only one plot per epoch to save space
 				plotter.plot_overall_transmission_trace(fom_evolution['transmission'], OPTIMIZATION_PLOTS_FOLDER)
+				plotter.visualize_device(cur_index, OPTIMIZATION_PLOTS_FOLDER)
+				# plotter.plot_moments(adam_moments, OPTIMIZATION_PLOTS_FOLDER)
+				# plotter.plot_step_size(adam_moments, OPTIMIZATION_PLOTS_FOLDER)
+
 
 
 
@@ -1416,7 +1612,7 @@ else:		# optimization
 	
 				# Initialize arrays to store the gradients of each polarization, each the shape of the voxel mesh
 				# This array therefore has shape (polarizations, mesh_lateral, mesh_lateral, mesh_vertical)
-				xy_polarized_gradients = [ np.zeros(field_shape, dtype=np.complex), np.zeros(field_shape, dtype=np.complex) ]
+				xy_polarized_gradients = [ np.zeros(field_shape, dtype=np.complex128), np.zeros(field_shape, dtype=np.complex128) ]
 				
 
 				for adj_src_idx in range(0, num_adjoint_sources):
@@ -1486,12 +1682,16 @@ else:		# optimization
 										weight_individual_wavelengths_by_quad[ adj_src_idx, spectral_indices[ 0 ] + spectral_idx  ] *
 										weight_individual_wavelengths[ spectral_indices[ 0 ] + spectral_idx ] *
 										performance_weighting[ spectral_indices[0] + spectral_idx ] )
+									# gradient_performance_weight = weight_individual_wavelengths[ spectral_indices[ 0 ] + spectral_idx ] * performance_weighting[ spectral_indices[0] + spectral_idx ]
+									# gradient_performance_weight = performance_weighting[ spectral_indices[0] + spectral_idx ]
 
 									if do_rejection:
 										if weight_by_quadrant_transmission:
 											gradient_performance_weight *= softplus_prime( transmission_by_wavelength[ spectral_idx ] )
 										else:
 											gradient_performance_weight *= softplus_prime( intensity_fom_by_wavelength[ spectral_idx ] )
+										
+										# gradient_performance_weight *= softplus_prime( intensity_fom_by_wavelength[ spectral_idx ] )
 		  
 								if do_rejection:
 									gradient_performance_weight *= spectral_focal_plane_map_directional_weights[ adj_src_idx ][ spectral_idx ]
@@ -1535,7 +1735,7 @@ else:		# optimization
 
 				if add_pdaf:
 
-					xy_polarized_gradients_pdaf = [ np.zeros(field_shape, dtype=np.complex), np.zeros(field_shape, dtype=np.complex) ]
+					xy_polarized_gradients_pdaf = [ np.zeros(field_shape, dtype=np.complex128), np.zeros(field_shape, dtype=np.complex128) ]
 
 					polarizations = [ 'x', 'y' ]
 
@@ -1605,6 +1805,7 @@ else:		# optimization
 					load_backup_vars(shelf_fn)
 			
 				logging.info("Beginning Step 4: Stepping Design Variable.")
+				# TODO: Rewrite this part to use optimizers / NLOpt. -----------------------------------
 	
 				# Get the full device gradient by summing the x,y polarization components 
 				device_gradient = 2 * ( xy_polarized_gradients[0] + xy_polarized_gradients[1] )
@@ -1670,6 +1871,9 @@ else:		# optimization
 				# Step size
 	 
 				cur_design_variable = bayer_filter.get_design_variable()
+
+				if optimizer_algorithm.lower() not in ['gradient descent']:
+					use_fixed_step_size = True
 				if use_fixed_step_size:
 					step_size = fixed_step_size
 				else:
@@ -1738,11 +1942,14 @@ else:		# optimization
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + '/device_gradient.npy'), device_gradient)			# Gradient of FoM obtained from adjoint method
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + '/design_gradient.npy'), design_gradient)			# device_gradient, propagated through chain-rule filters
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/step_size_evolution.npy"), step_size_evolution)
+				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/binarization_evolution.npy"), binarization_evolution)
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/cur_design_variable.npy"), cur_design_variable)	# Current Design variable i.e. density between 0 and 1
+				np.save(os.path.abspath(EVALUATION_FOLDER + "/cur_design_variable.npy"), cur_design_variable)
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/cur_design.npy"), cur_design)						# Current Design variable after filters
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/cur_design_variable_epoch_" + str( epoch ) + ".npy"), cur_design_variable)
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/average_design_change_evolution.npy"), average_design_variable_change_evolution)
 				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + "/max_design_change_evolution.npy"), max_design_variable_change_evolution)
+				np.save(os.path.abspath(OPTIMIZATION_INFO_FOLDER + '/adam_moments.npy'), adam_moments)			# ADAM Moments
 				
 				logging.info("Completed Step 4: Saved out cur_design_variable.npy and other files.")
 				backup_all_vars()

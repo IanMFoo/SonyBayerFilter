@@ -52,7 +52,7 @@ source_angle_theta_vacuum_deg: 0
 source_angle_phi_deg: 0
 num_epochs: 10
 num_iterations_per_epoch: 30
-desired_peaks_per_band_um: [ 0.48, 0.52, 0.59 ]
+desired_peaks_per_band_um: [ 0.45, 0.54, 0.65 ]
 ```  
 
 
