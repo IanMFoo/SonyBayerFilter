@@ -1286,8 +1286,8 @@ else:		# optimization
 					fdtd_hook.select( design_import['name'] )
 					# fdtd_hook.importnk2( cur_index, bayer_filter_region_x, 
 					# 					bayer_filter_region_y, bayer_filter_region_z )
-					fdtd_hook.importnk2( cur_index, bayer_filter_region_reinterpolate_x, 
-										bayer_filter_region_reinterpolate_y, bayer_filter_region_reinterpolate_z )
+					fdtd_hook.importnk2( cur_index, bayer_filter_region_import_x, 
+										bayer_filter_region_import_y, bayer_filter_region_import_z )
 
 	 
 					# Disable device index monitor
