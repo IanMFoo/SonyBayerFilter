@@ -1,0 +1,12 @@
+scipy==1.11.*
+numpy==1.25.*
+numpy-stl==3.3.1
+matplotlib==3.7.1
+scikit-image==0.20.*
+overrides==7.4.*
+PyYAML
+types-PyYAML
+python-magic
+dill
+Jinja2
+PySide6==6.6.1

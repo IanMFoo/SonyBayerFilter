@@ -1,5 +1,5 @@
 # SONY Volumetric Inverse Photonic (VIP) Design Optimizer
-Copyright © 2023, California Institute of Technology. All rights reserved.
+Copyright © 2024, California Institute of Technology. All rights reserved.
 
 Use in source and binary forms for nonexclusive, nonsublicenseable, commercial purposes with or without modification, is permitted provided that the following conditions are met:
 
@@ -11,7 +11,7 @@ THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND 
 
 
 # Project Description
-This code performs an inverse-design optimization based on the adjoint optimization technique [2] that designs a freeform multilayer optical Bayer filter and focusing lens as described in [1]. The Bayer filter is multiwavelength and focuses and sorts different spectral bands into different prescribed locations on the focal plane. Otherwise known as a color router, this code is set by default to create a 5-layer filter for the visible spectral range, with lateral and vertical dimensions of 2.04 microns. Different options are available in the config to, for example, enable polarization sorting or adjust the spectral bands as necessary.
+This code performs an inverse-design optimization based on the adjoint optimization technique [2] that designs a freeform multilayer optical Bayer filter and focusing lens as described in [1]. The Bayer filter is multiwavelength and focuses and sorts different spectral bands into different prescribed locations on the focal plane. Otherwise known as a color router, this code is set by default to create a 10-layer filter for the visible spectral range, with lateral and vertical dimensions of 2.04 microns. Different options are available in the config to, for example, enable polarization sorting or adjust the spectral bands as necessary.
 
 References: [[1]](https://doi.org/10.1364/OPTICA.384228), [[2]](https://doi.org/10.1364/OE.21.021693)  
 
@@ -40,10 +40,10 @@ The following are some parameters in `test_config_sony.yaml` that are often adju
 mesh_spacing_um: 0.017 
 geometry_spacing_lateral_um: 0.085
 device_scale_um: 0.051    # Controls vertical dimensions e.g. focal length, device vertical layer voxels, and FDTD gap sizes.
-num_vertical_layers: 5
+num_vertical_layers: 10
 vertical_layer_height_um: 0.204
 device_size_lateral_um: 2.04
-sidewall_thickness_um: 0.085
+sidewall_thickness_um: 0.24
 sidewall_material: 'air'
 lambda_min_um: 0.375
 lambda_max_um: 0.725
@@ -52,7 +52,7 @@ source_angle_theta_vacuum_deg: 0
 source_angle_phi_deg: 0
 num_epochs: 10
 num_iterations_per_epoch: 30
-desired_peaks_per_band_um: [ 0.45, 0.54, 0.65 ]
+desired_peaks_per_band_um: [ 0.48, 0.52, 0.59 ]
 ```  
 
 
@@ -73,9 +73,9 @@ Parts of the code distinguish between running on a local machine and running on 
 
 
 ### Initiating the Optimization
-The current code is set up to interface with the SLURM job scheduler on a HPC cluster. The batch script `slurm_vis5lyr.sh` should be called with the command:
+The current code is set up to interface with the SLURM job scheduler on a HPC cluster. The batch script `slurm_vis10lyr.sh` should be called with the command:
 ```
-sbatch slurm_vis5lyr.sh
+sbatch slurm_vis10lyr.sh
 ```
 and the parameters of running the job are included in this file according to the [SLURM Documentation](https://slurm.schedmd.com/sbatch.html). More information can be found there.
 
@@ -112,4 +112,4 @@ restart_epoch: 5            # Both 0 if not restarting
 restart_iter: 14
 ```
 
-3. Run `slurm_vis5lyr.sh` again.
+3. Run `slurm_vis10lyr.sh` again.
