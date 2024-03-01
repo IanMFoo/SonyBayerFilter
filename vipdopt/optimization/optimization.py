@@ -71,6 +71,7 @@ class Optimization:
 
         self.epoch = start_epoch
         self.iteration = start_iter
+        self.true_iteration = start_epoch * iter_per_epoch + start_iter
         self.max_epochs = max_epochs
         self.iter_per_epoch = iter_per_epoch
         self.epoch_list = list(range(0,max_epochs*iter_per_epoch+1,iter_per_epoch))
@@ -151,17 +152,17 @@ class Optimization:
         if self.cfg['simulator_dimension'] == '2D':
             intensity_fig = plotter.plot_Enorm_focal_2d(np.sum(np.abs(np.squeeze(E_focal['E']))**2, axis=-1),
                                                     E_focal['x'], E_focal['lambda'],
-                                                    folder, self.iteration, wl_idxs=[7,22])
+                                                    folder, self.true_iteration, wl_idxs=[7,22])
         elif self.cfg['simulator_dimension'] == '3D':
             intensity_fig = plotter.plot_Enorm_focal_3d(np.sum(np.abs(np.squeeze(E_focal['E']))**2, axis=-1),
                                                     E_focal['x'], E_focal['y'], E_focal['lambda'],
-                                                    folder, self.iteration, wl_idxs=[9,29,49])
+                                                    folder, self.true_iteration, wl_idxs=[9,29,49])
         
             indiv_trans_fig = plotter.plot_individual_quadrant_transmission(self.fom_evolution['transmission'], 
-                                self.cfg['lambda_values_um'], folder, self.iteration)	# continuously produces only one plot per epoch to save space
+                                self.cfg['lambda_values_um'], folder, self.true_iteration)	# continuously produces only one plot per epoch to save space
         
         cur_index = self.device.index_from_permittivity(self.device.get_permittivity())
-        final_device_layer_fig, _ = plotter.visualize_device(cur_index, folder, iteration=self.iteration)
+        final_device_layer_fig, _ = plotter.visualize_device(cur_index, folder, iteration=self.true_iteration)
         
         # # plotter.plot_moments(adam_moments, OPTIMIZATION_PLOTS_FOLDER)
         # # plotter.plot_step_size(adam_moments, OPTIMIZATION_PLOTS_FOLDER)
@@ -237,8 +238,8 @@ class Optimization:
 
         # Save out current design/density profile
         np.save(os.path.abspath(self.dirs['opt_info'] / "cur_design.npy"), self.device.get_design_variable())
-        if self.iteration in self.epoch_list:	# i.e. new epoch
-            np.save(os.path.abspath(self.dirs['opt_info'] /  f"cur_design_e{self.epoch_list.index(self.iteration)}.npy"), self.device.get_design_variable())
+        if self.true_iteration in self.epoch_list:	# i.e. new epoch
+            np.save(os.path.abspath(self.dirs['opt_info'] /  f"cur_design_e{self.epoch_list.index(self.true_iteration)}.npy"), self.device.get_design_variable())
 
         
         #
@@ -296,6 +297,9 @@ class Optimization:
                 vipdopt.logger.info(
                     f'=========\nEpoch {self.epoch}, iter {self.iteration}: Running simulations...'
                 )
+                self.true_iteration = self.epoch * self.iter_per_epoch + self.iteration
+                
+                
                 vipdopt.logger.debug(
                     f'\tDesign Variable: {self.device.get_design_variable()}'
                 )
@@ -353,12 +357,12 @@ class Optimization:
                             f.true_fom /= np.array(self.cfg['max_intensity_by_wavelength'])[list(f.opt_ids)]
                             
                             # Store fom, restricted fom, true fom
-                            self.fom_evolution['transmission'][self.iteration, f_idx, :] = np.squeeze(f.fom)
-                            self.fom_evolution['overall_transmission'][self.iteration, f_idx, :] = np.squeeze(np.abs(
+                            self.fom_evolution['transmission'][self.true_iteration, f_idx, :] = np.squeeze(f.fom)
+                            self.fom_evolution['overall_transmission'][self.true_iteration, f_idx, :] = np.squeeze(np.abs(
                                         f.fom_monitors[0].sim.getresult('transmission_focal_monitor_', 'T', 'T')
                                     ))
                             # todo: add line for restricted fom
-                            self.fom_evolution[self.cfg['optimization_fom']][self.iteration, f_idx, :] = np.squeeze(f.true_fom)
+                            self.fom_evolution[self.cfg['optimization_fom']][self.true_iteration, f_idx, :] = np.squeeze(f.true_fom)
 
                         # gc.collect()
             
@@ -392,8 +396,8 @@ class Optimization:
                 # NOTE: Reminder that fom_evolution is a dictionary with keys: fom_types
                 # and values being numpy arrays of shape (iterations, focal_areas, wavelengths)
                 list_overall_figure_of_merit = self.fom_func(self.foms, self.weights)
-                self.figure_of_merit_evolution[self.iteration] = np.sum(list_overall_figure_of_merit, -1)			# Sum over wavelength
-                vipdopt.logger.info(f'Figure of merit is now: {self.figure_of_merit_evolution[self.iteration]}')
+                self.figure_of_merit_evolution[self.true_iteration] = np.sum(list_overall_figure_of_merit, -1)			# Sum over wavelength
+                vipdopt.logger.info(f'Figure of merit is now: {self.figure_of_merit_evolution[self.true_iteration]}')
 
                 
                 # Save out variables that need saving for restart and debug purposes
@@ -511,7 +515,7 @@ class Optimization:
                 # w_hat = self.device.get_design_variable() + 0.05 * design_gradient_unfiltered
                 # w_hat = np.random.random(self.device.get_design_variable().shape)
                 # self.device.set_design_variable(np.maximum(np.minimum(w_hat, 1), 0))
-                self.optimizer.step(self.device, design_gradient_unfiltered, self.iteration)
+                self.optimizer.step(self.device, design_gradient_unfiltered, self.true_iteration)
 
 
                 #* Save out overall savefile, save out all save information as separate files as well.
