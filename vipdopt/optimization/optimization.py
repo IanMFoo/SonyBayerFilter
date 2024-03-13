@@ -13,7 +13,7 @@ import numpy.typing as npt
 from scipy import interpolate
 
 import vipdopt
-from vipdopt import STL
+from vipdopt import STL, GDS
 from vipdopt.eval import plotter
 from vipdopt.optimization.device import Device
 from vipdopt.optimization.optimizer import GradientOptimizer
@@ -528,8 +528,52 @@ class Optimization:
         final_params = self.param_hist[-1]
         vipdopt.logger.info(f'Final Parameters: {final_params}')
         self._post_run()
-
+        
+        # STL Export requires density to be fully binarized
         full_density = self.device.binarize(self.device.get_density())
         stl_generator = STL.STL(full_density)
         stl_generator.generate_stl()
         stl_generator.save_stl( self.dirs['data'] / 'final_device.stl' )
+        
+        # GDS Export must be done in layers. We split the full design into individual layers, (not related to design layers)
+        # Express each layer as polygons in an STL Mesh object and write that layer into its own cell of the GDS file
+        layer_mesh_array = []
+        for z_layer in range(full_density.shape[2]):
+            stl_generator = STL.STL(full_density[..., z_layer][..., np.newaxis])
+            stl_generator.generate_stl()
+            layer_mesh_array.append(stl_generator.stl_mesh)
+        
+        # Create a GDS object that contains a Library with Cells corresponding to each 2D layer in the 3D device.
+        gds_generator = GDS.GDS().set_layers(full_density.shape[2], 
+                                             unit=(2.04e-6)/(40e-6) * (1e-6))
+        gds_generator.assemble_device(layer_mesh_array, listed=False)
+
+        # Directory for export
+        gds_layer_dir = os.path.join(self.dirs['data'] / 'gds')
+        if not os.path.exists(gds_layer_dir):
+            os.makedirs(gds_layer_dir)
+        # Export both GDS and SVG for easy visualization.
+        gds_generator.export_device(gds_layer_dir, filetype='gds')
+        gds_generator.export_device(gds_layer_dir, filetype='svg')
+        # for layer_idx in range(0, full_density.shape[2]):         # Individual layer as GDS file export
+        #     gds_generator.export_device(gds_layer_dir, filetype='gds', layer_idx=layer_idx)
+        #     gds_generator.export_device(gds_layer_dir, filetype='svg', layer_idx=layer_idx)
+        
+        # # # Here is a function for GDS device import - be warned this takes maybe 3-5 minutes per layer.
+        # # def import_gds(sim, device, gds_layer_dir):
+        # #     import time
+            
+        # #     sim.fdtd.load(sim.info['name'])
+        # #     sim.fdtd.switchtolayout()
+        # #     device_name = device.import_names()[0]
+        # #     sim.disable([device_name])
+            
+        # #     z_vals = device.coords['z']
+        # #     for z_idx in range(len(z_vals)):
+        # #         t = time.time()
+        # #         # fdtd.gdsimport(os.path.join(gds_layer_dir, 'device.gds'), f'L{layer_idx}', 0)
+        # #         sim.fdtd.gdsimport(os.path.join(gds_layer_dir, 'device.gds'), f'L{z_idx}', 0, "Si (Silicon) - Palik",
+        # #                     z_vals[z_idx], z_vals[z_idx+1])
+        # #         # Structure group x and y are the bottom left corner instead of the middle point.
+        # #         sim.fdtd.set({'x': device.coords['x'][0], 'y': device.coords['y'][0]})      # Be careful of units - 1e-6
+        # #         vipdopt.logger.info(f'Layer {z_idx} imported in {time.time()-t} seconds.')
