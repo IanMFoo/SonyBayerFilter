@@ -545,7 +545,7 @@ class Optimization:
         
         # Create a GDS object that contains a Library with Cells corresponding to each 2D layer in the 3D device.
         gds_generator = GDS.GDS().set_layers(full_density.shape[2], 
-                                             unit=(2.04e-6)/(40e-6) * (1e-6))
+                unit = 1e-6 * np.abs(self.device.coords['x'][-1] - self.device.coords['x'][0])/self.device.size[0])
         gds_generator.assemble_device(layer_mesh_array, listed=False)
 
         # Directory for export
